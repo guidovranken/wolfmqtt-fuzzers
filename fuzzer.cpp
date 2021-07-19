@@ -42,7 +42,7 @@ MqttQoS Base::GetQoS(void) const {
 
 class Topic : public Base {
     private:
-        MqttTopic topic;
+        MqttTopic* topic;
         std::vector<std::string> strings;
     public:
         Topic(fuzzing::datasource::Datasource& ds);
@@ -52,20 +52,23 @@ class Topic : public Base {
 };
 
 Topic::Topic(fuzzing::datasource::Datasource& ds) :
-    Base(ds)
-{ }
+    Base(ds) {
+    topic = new MqttTopic;
+}
 
-Topic::~Topic() { }
+Topic::~Topic() {
+    delete topic;
+}
 
 bool Topic::Generate(void) {
     bool ret;
 
-    memset(&topic, 0, sizeof(topic));
+    memset(topic, 0, sizeof(*topic));
 
     strings.push_back( ds.Get<std::string>() );
-    topic.topic_filter = strings.back().c_str();
+    topic->topic_filter = strings.back().c_str();
 
-    topic.qos = GetQoS();
+    topic->qos = GetQoS();
 
     ret = true;
 end:
@@ -73,7 +76,7 @@ end:
 }
 
 MqttTopic Topic::Get(void) {
-    return topic;
+    return *topic;
 }
 
 class Topics : public Base {
@@ -129,9 +132,9 @@ size_t Topics::Size(void) const {
 }
 
 class wolfMQTTFuzzer : public Base {
-        MqttClient client;
-        MqttNet net;
-        MqttConnect connect;
+        MqttClient* client;
+        MqttNet* net;
+        MqttConnect* connect;
 
         uint8_t* tx_buf = nullptr, *rx_buf = nullptr;
         size_t tx_size = 0, rx_size = 0;
@@ -228,6 +231,7 @@ word16 wolfMQTTFuzzer::GetPacketId(void) const {
 
 bool wolfMQTTFuzzer::subscribe(void) {
     MqttTopic* topicsArray = nullptr;
+    MqttSubscribe* subscribe = nullptr;
 
     bool ret = false;
 
@@ -235,16 +239,15 @@ bool wolfMQTTFuzzer::subscribe(void) {
         Topics topics(ds);
         CHECK_EQ(topics.Generate(), true);
 
-        MqttSubscribe subscribe;
+        subscribe = new MqttSubscribe;
+        memset(subscribe, 0, sizeof(*subscribe));
 
-        memset(&subscribe, 0, sizeof(subscribe));
-
-        subscribe.packet_id = GetPacketId();
+        subscribe->packet_id = GetPacketId();
         topicsArray = topics.ToArray();
-        subscribe.topic_count = topics.Size();
-        subscribe.topics = topicsArray;
+        subscribe->topic_count = topics.Size();
+        subscribe->topics = topicsArray;
 
-        CHECK_EQ(MqttClient_Subscribe(&client, &subscribe), MQTT_CODE_SUCCESS);
+        CHECK_EQ(MqttClient_Subscribe(client, subscribe), MQTT_CODE_SUCCESS);
 
         ret = true;
     } catch ( ... ) { }
@@ -252,12 +255,17 @@ bool wolfMQTTFuzzer::subscribe(void) {
 end:
     if ( topicsArray ) {
         delete[] topicsArray;
+    }
+
+    if ( subscribe ) {
+        delete subscribe;
     }
     return ret;
 }
 
 bool wolfMQTTFuzzer::unsubscribe(void) {
     MqttTopic* topicsArray = nullptr;
+    MqttUnsubscribe* unsubscribe = nullptr;
 
     bool ret = false;
 
@@ -265,16 +273,15 @@ bool wolfMQTTFuzzer::unsubscribe(void) {
         Topics topics(ds);
         CHECK_EQ(topics.Generate(), true);
 
-        MqttUnsubscribe unsubscribe;
+        unsubscribe = new MqttUnsubscribe;
+        memset(unsubscribe, 0, sizeof(*unsubscribe));
 
-        memset(&unsubscribe, 0, sizeof(unsubscribe));
-
-        unsubscribe.packet_id = GetPacketId();
+        unsubscribe->packet_id = GetPacketId();
         topicsArray = topics.ToArray();
-        unsubscribe.topic_count = topics.Size();
-        unsubscribe.topics = topicsArray;
+        unsubscribe->topic_count = topics.Size();
+        unsubscribe->topics = topicsArray;
 
-        CHECK_EQ(MqttClient_Unsubscribe(&client, &unsubscribe), MQTT_CODE_SUCCESS);
+        CHECK_EQ(MqttClient_Unsubscribe(client, unsubscribe), MQTT_CODE_SUCCESS);
 
         ret = true;
     } catch ( ... ) { }
@@ -283,62 +290,72 @@ end:
     if ( topicsArray ) {
         delete[] topicsArray;
     }
+
+    if ( unsubscribe ) {
+        delete unsubscribe;
+    }
+
     return ret;
 }
 
 bool wolfMQTTFuzzer::publish(void) {
     bool ret = false;
+    MqttPublish* publish = nullptr;
 
     try {
-        MqttPublish publish;
+        publish = new MqttPublish;
+        memset(publish, 0, sizeof(*publish));
 
-        memset(&publish, 0, sizeof(publish));
-
-        publish.retain = ds.Get<bool>() ? 1 : 0;
-        publish.qos = GetQoS();
-        publish.duplicate = ds.Get<bool>() ? 1 : 0;
+        publish->retain = ds.Get<bool>() ? 1 : 0;
+        publish->qos = GetQoS();
+        publish->duplicate = ds.Get<bool>() ? 1 : 0;
 
         const auto topic_str = ds.Get<std::string>();
-        publish.topic_name = topic_str.c_str();
+        publish->topic_name = topic_str.c_str();
 
-        publish.packet_id = GetPacketId();
+        publish->packet_id = GetPacketId();
 
         auto buffer = ds.GetData(0);
-        publish.buffer = buffer.data();
-        publish.total_len = buffer.size();
+        publish->buffer = buffer.data();
+        publish->total_len = buffer.size();
 
         if ( DEBUG ) {
             printf("publish: topic name size: %zu\n", strlen(topic_str.c_str()));
         }
 
-        CHECK_EQ(MqttClient_Publish(&client, &publish), MQTT_CODE_SUCCESS);
+        CHECK_EQ(MqttClient_Publish(client, publish), MQTT_CODE_SUCCESS);
 
         ret = true;
     } catch ( ... ) { }
 
 end:
+    if ( publish ) {
+        delete publish;
+    }
+
     return ret;
 }
 
 bool wolfMQTTFuzzer::ping(void) {
     bool ret = false;
 
-    MqttPing ping;
+    MqttPing* ping = new MqttPing;
+    memset(ping, 0, sizeof(*ping));
 
-    memset(&ping, 0, sizeof(ping));
-
-    CHECK_EQ(MqttClient_Ping_ex(&client, &ping), true);
+    CHECK_EQ(MqttClient_Ping_ex(client, ping), true);
 
     ret = true;
 
 end:
+    delete ping;
+
     return ret;
 }
 
 bool wolfMQTTFuzzer::wait(void) {
     bool ret = false;
 
-    CHECK_EQ(MqttClient_WaitMessage(&client, 1000), MQTT_CODE_SUCCESS);
+    CHECK_EQ(MqttClient_WaitMessage(client, 1000), MQTT_CODE_SUCCESS);
 
     ret = true;
 
@@ -347,32 +364,39 @@ end:
 }
 
 wolfMQTTFuzzer::wolfMQTTFuzzer(fuzzing::datasource::Datasource& ds) :
-    Base(ds)
-{ }
+    Base(ds) {
+        client = new MqttClient;
+        net = new MqttNet;
+        connect = new MqttConnect;
+}
 
 wolfMQTTFuzzer::~wolfMQTTFuzzer() {
     this->free(tx_buf);
     this->free(rx_buf);
+    delete client;
+    delete net;
+    delete connect;
 }
 
 bool wolfMQTTFuzzer::Initialize(void) {
     bool ret = false;
+    MqttMessage* lwt_msg = nullptr;
 
     try {
         /* net */
         {
-            memset(&net, 0, sizeof(net));
+            memset(net, 0, sizeof(*net));
 
-            net.connect = mqtt_connect;
-            net.read = mqtt_recv;
-            net.write = mqtt_write;
-            net.disconnect = mqtt_disconnect;
-            net.context = this;
+            net->connect = mqtt_connect;
+            net->read = mqtt_recv;
+            net->write = mqtt_write;
+            net->disconnect = mqtt_disconnect;
+            net->context = this;
         }
 
         /* client */
         {
-            memset(&client, 0, sizeof(client));
+            memset(client, 0, sizeof(*client));
 
             tx_size = ds.Get<uint16_t>();
             tx_size = 4096;
@@ -383,42 +407,44 @@ bool wolfMQTTFuzzer::Initialize(void) {
             memset(tx_buf, 0, tx_size);
             memset(rx_buf, 0, rx_size);
 
-            client.msg_cb = mqtt_message_cb;
-            client.tx_buf = tx_buf;
-            client.tx_buf_len = tx_size;
-            client.rx_buf = rx_buf;
-            client.rx_buf_len = rx_size;
-            client.cmd_timeout_ms = 1000;
+            client->msg_cb = mqtt_message_cb;
+            client->tx_buf = tx_buf;
+            client->tx_buf_len = tx_size;
+            client->rx_buf = rx_buf;
+            client->rx_buf_len = rx_size;
+            client->cmd_timeout_ms = 1000;
         }
 
         /* connect */
-        MqttMessage lwt_msg;
         {
-            memset(&connect, 0, sizeof(connect));
+            memset(connect, 0, sizeof(*connect));
 
-            connect.keep_alive_sec = 1;
-            connect.clean_session = ds.Get<bool>() ? 1 : 0;
+            connect->keep_alive_sec = 1;
+            connect->clean_session = ds.Get<bool>() ? 1 : 0;
             client_id = ds.Get<std::string>();
-            connect.client_id = client_id.c_str();
-            connect.enable_lwt = ds.Get<bool>() ? 1 : 0;
+            connect->client_id = client_id.c_str();
+            connect->enable_lwt = ds.Get<bool>() ? 1 : 0;
         }
             
         std::string lwt_topic_name;
         std::vector<uint8_t> lwt_buffer;
 
-        if ( connect.enable_lwt ) {
+        if ( connect->enable_lwt ) {
             lwt_topic_name = ds.Get<std::string>();
             lwt_buffer = ds.GetData(0);
 
-            connect.lwt_msg = &lwt_msg;
-            lwt_msg.qos = GetQoS();
-            lwt_msg.retain = ds.Get<bool>() ? 1 : 0;
-            lwt_msg.topic_name = lwt_topic_name.c_str();
-            lwt_msg.buffer = lwt_buffer.data();
-            lwt_msg.total_len = lwt_buffer.size();
+            lwt_msg = new MqttMessage;
+            memset(lwt_msg, 0, sizeof(*lwt_msg));
+
+            connect->lwt_msg = lwt_msg;
+            lwt_msg->qos = GetQoS();
+            lwt_msg->retain = ds.Get<bool>() ? 1 : 0;
+            lwt_msg->topic_name = lwt_topic_name.c_str();
+            lwt_msg->buffer = lwt_buffer.data();
+            lwt_msg->total_len = lwt_buffer.size();
         }
 
-        CHECK_EQ(MqttSocket_Init(&client, &net), MQTT_CODE_SUCCESS);
+        CHECK_EQ(MqttSocket_Init(client, net), MQTT_CODE_SUCCESS);
 
 #if 0
         if ( ds.Get<bool>() ) {
@@ -426,16 +452,18 @@ bool wolfMQTTFuzzer::Initialize(void) {
         }
 #endif
 
-        CHECK_EQ(MqttClient_NetConnect(&client, "dummy", 12345, 1000, 0, NULL), MQTT_CODE_SUCCESS);
-        CHECK_EQ(MqttClient_Connect(&client, &connect), MQTT_CODE_SUCCESS);
+        CHECK_EQ(MqttClient_NetConnect(client, "dummy", 12345, 1000, 0, NULL), MQTT_CODE_SUCCESS);
+        CHECK_EQ(MqttClient_Connect(client, connect), MQTT_CODE_SUCCESS);
 
         ret = true;
-
     } catch ( ... ) {
-        return false;
+        ret = false;
     }
 
 end:
+    if ( lwt_msg ) {
+        delete lwt_msg;
+    }
     return ret;
 }
 
@@ -463,7 +491,7 @@ void wolfMQTTFuzzer::Run(void) {
             }
         }
 
-        MqttClient_NetDisconnect(&client);
+        MqttClient_NetDisconnect(client);
     } catch ( ... ) { }
 }
 
