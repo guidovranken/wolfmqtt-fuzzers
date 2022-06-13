@@ -101,7 +101,7 @@ Topics::~Topics() {
 }
         
 bool Topics::Generate(void) {
-    bool ret;
+    bool ret = false;
 
     try {
         const auto numTopics = ds.Get<uint16_t>() % (MAX_TOPICS+1);
